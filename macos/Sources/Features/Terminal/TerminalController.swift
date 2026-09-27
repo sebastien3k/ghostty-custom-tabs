@@ -461,7 +461,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         controller.isBackgroundOpaque = parentController.isBackgroundOpaque
         let customTabGroup: CustomTabGroup?
         if parentController.derivedConfig.macosTitlebarStyle == .hidden {
-            let group = parentController.customTabGroup ?? CustomTabGroup()
+            let group = parentController.customTabGroup ?? CustomTabGroup(
+                switchAnimation: ghostty.config.macosCustomTabSwitchAnimation)
             if parentController.customTabGroup == nil {
                 parentController.customTabGroup = group
                 group.add(parentController)
@@ -606,6 +607,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         if notification.object == nil {
             // Update our derived config
             self.derivedConfig = DerivedConfig(config)
+            customTabGroup?.switchAnimation = config.macosCustomTabSwitchAnimation
 
             // If we have no surfaces in our window (is that possible?) then we update
             // our window appearance based on the root config. If we have surfaces, we
@@ -1151,7 +1153,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // independent TerminalController and Ghostty surface tree.
         if derivedConfig.macosTitlebarStyle == .hidden,
            customTabGroup == nil {
-            let group = CustomTabGroup()
+            let group = CustomTabGroup(
+                switchAnimation: config.macosCustomTabSwitchAnimation)
             customTabGroup = group
             group.add(self)
         }
@@ -1277,7 +1280,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         let frame = window.frame
         group.remove(self)
 
-        let detachedGroup = CustomTabGroup()
+        let detachedGroup = CustomTabGroup(
+            switchAnimation: ghostty.config.macosCustomTabSwitchAnimation)
         customTabGroup = detachedGroup
         detachedGroup.add(self)
         window.setFrame(frame, display: true)

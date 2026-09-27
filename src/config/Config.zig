@@ -3423,6 +3423,21 @@ keybind: Keybinds = .{},
 /// This option only affects the custom hidden-titlebar tab bar on macOS.
 @"macos-custom-tab-background-opacity": f64 = 0.11,
 
+/// The transition used when switching between custom hidden-titlebar tabs.
+/// The transition is applied to the composited window contents and does not
+/// affect terminal rendering or PTY processing.
+///
+/// Valid values are:
+///
+///   * `spring` - A short directional transition with a lightly damped finish.
+///   * `fade` - Crossfade between terminal contents without movement.
+///   * `none` - Switch immediately without animation.
+///
+/// The default is `spring`.
+///
+/// This option only affects the custom hidden-titlebar tab bar on macOS.
+@"macos-custom-tab-switch-animation": MacCustomTabSwitchAnimation = .spring,
+
 /// Whether the proxy icon in the macOS titlebar is visible. The proxy icon
 /// is the icon that represents the folder of the current working directory.
 /// You can see this very clearly in the macOS built-in Terminal.app
@@ -9225,6 +9240,13 @@ pub const MacTitlebarStyle = enum {
     transparent,
     tabs,
     hidden,
+};
+
+/// See macos-custom-tab-switch-animation
+pub const MacCustomTabSwitchAnimation = enum {
+    none,
+    fade,
+    spring,
 };
 
 /// See macos-titlebar-proxy-icon

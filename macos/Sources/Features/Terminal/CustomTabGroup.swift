@@ -19,6 +19,13 @@ final class CustomTabGroup: ObservableObject {
     @Published private(set) var closingIDs: Set<UUID> = []
 
     private var members: [Member] = []
+    private var selectionTransitionGeneration: UInt = 0
+
+    var switchAnimation: Ghostty.Config.MacOSCustomTabSwitchAnimation
+
+    init(switchAnimation: Ghostty.Config.MacOSCustomTabSwitchAnimation = .spring) {
+        self.switchAnimation = switchAnimation
+    }
 
     var controllers: [TerminalController] {
         members.compactMap(\.controller)
@@ -88,6 +95,8 @@ final class CustomTabGroup: ObservableObject {
     func remove(_ controller: TerminalController, selectNeighbor: Bool = true) {
         compact()
         guard let index = members.firstIndex(where: { $0.controller === controller }) else { return }
+        selectionTransitionGeneration &+= 1
+        resetWindowPresentation()
         let wasSelected = selectedID == controller.customTabID
         members.remove(at: index)
         revision &+= 1
@@ -106,23 +115,169 @@ final class CustomTabGroup: ObservableObject {
         compact()
         guard contains(controller), let targetWindow = controller.window else { return }
 
-        let source = sourceWindow ?? selectedController?.window
+        let sourceController = selectedController
+        let source = sourceWindow ?? sourceController?.window
         let frame = source?.frame
+        let sourceIndex = sourceController.flatMap { selected in
+            controllers.firstIndex { $0 === selected }
+        }
+        let targetIndex = controllers.firstIndex { $0 === controller }
+
+        selectionTransitionGeneration &+= 1
+        let generation = selectionTransitionGeneration
+        resetWindowPresentation()
         selectedID = controller.customTabID
 
-        for candidate in controllers where candidate !== controller {
+        for candidate in controllers where candidate !== controller && candidate !== sourceController {
             candidate.window?.orderOut(nil)
         }
 
         if let frame, !targetWindow.styleMask.contains(.fullScreen) {
-            targetWindow.setFrame(frame, display: true)
+            targetWindow.setFrame(frame, display: false)
         }
 
+        let transition = resolvedSwitchAnimation
+        if transition != .none,
+           let sourceController,
+           sourceController !== controller,
+           let source,
+           !source.styleMask.contains(.fullScreen),
+           !targetWindow.styleMask.contains(.fullScreen),
+           let sourceIndex,
+           let targetIndex,
+           source.contentView?.layer != nil,
+           targetWindow.contentView?.layer != nil {
+            let direction: CGFloat = targetIndex > sourceIndex ? 1 : -1
+            animateSelection(
+                from: source,
+                to: targetWindow,
+                direction: direction,
+                transition: transition,
+                generation: generation)
+        } else {
+            for candidate in controllers where candidate !== controller {
+                candidate.window?.orderOut(nil)
+            }
+            targetWindow.makeKeyAndOrderFront(nil)
+        }
+
+        focus(controller)
+        revision &+= 1
+    }
+
+    private var resolvedSwitchAnimation: Ghostty.Config.MacOSCustomTabSwitchAnimation {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+           switchAnimation == .spring {
+            return .fade
+        }
+        return switchAnimation
+    }
+
+    private func animateSelection(
+        from sourceWindow: NSWindow,
+        to targetWindow: NSWindow,
+        direction: CGFloat,
+        transition: Ghostty.Config.MacOSCustomTabSwitchAnimation,
+        generation: UInt
+    ) {
+        guard let sourceLayer = sourceWindow.contentView?.layer,
+              let targetLayer = targetWindow.contentView?.layer else { return }
+        let incomingOffset: CGFloat = transition == .spring ? direction * 12 : 0
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        sourceLayer.opacity = 1
+        sourceLayer.transform = CATransform3DIdentity
+        targetLayer.opacity = 0
+        targetLayer.transform = CATransform3DMakeTranslation(incomingOffset, 0, 0)
+        CATransaction.commit()
+
         targetWindow.makeKeyAndOrderFront(nil)
+
+        // Ordering a previously hidden window commits its layer tree. Start the
+        // transition on the next runloop so the initial state is presented first.
+        DispatchQueue.main.async { [weak self, weak sourceWindow, weak targetWindow] in
+            guard let self,
+                  let sourceWindow,
+                  let targetWindow,
+                  generation == selectionTransitionGeneration,
+                  selectedID == (targetWindow.windowController as? TerminalController)?.customTabID else { return }
+
+            let opacityDuration = transition == .spring ? 0.14 : 0.12
+            let opacityTiming = CAMediaTimingFunction(name: .easeInEaseOut)
+
+            let incomingOpacity = CABasicAnimation(keyPath: "opacity")
+            incomingOpacity.fromValue = 0
+            incomingOpacity.toValue = 1
+            incomingOpacity.duration = opacityDuration
+            incomingOpacity.timingFunction = opacityTiming
+
+            let outgoingOpacity = CABasicAnimation(keyPath: "opacity")
+            outgoingOpacity.fromValue = 1
+            outgoingOpacity.toValue = 0
+            outgoingOpacity.duration = opacityDuration
+            outgoingOpacity.timingFunction = opacityTiming
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            CATransaction.setCompletionBlock { [weak self, weak sourceWindow, weak targetWindow] in
+                guard let self,
+                      let sourceWindow,
+                      let targetWindow,
+                      generation == selectionTransitionGeneration else { return }
+                sourceWindow.orderOut(nil)
+                resetWindowPresentation([sourceWindow, targetWindow])
+            }
+
+            targetLayer.opacity = 1
+            targetLayer.transform = CATransform3DIdentity
+            sourceLayer.opacity = 0
+            targetLayer.add(incomingOpacity, forKey: "customTabIncomingOpacity")
+            sourceLayer.add(outgoingOpacity, forKey: "customTabOutgoingOpacity")
+
+            if transition == .spring {
+                let incomingPosition = CASpringAnimation(keyPath: "transform.translation.x")
+                incomingPosition.fromValue = incomingOffset
+                incomingPosition.toValue = 0
+                incomingPosition.mass = 1
+                incomingPosition.stiffness = 1_600
+                incomingPosition.damping = 68
+                incomingPosition.initialVelocity = 0
+                incomingPosition.duration = incomingPosition.settlingDuration
+                targetLayer.add(incomingPosition, forKey: "customTabIncomingPosition")
+
+                let outgoingPosition = CABasicAnimation(keyPath: "transform.translation.x")
+                outgoingPosition.fromValue = 0
+                outgoingPosition.toValue = -direction * 5
+                outgoingPosition.duration = opacityDuration
+                outgoingPosition.timingFunction = opacityTiming
+                sourceLayer.add(outgoingPosition, forKey: "customTabOutgoingPosition")
+            }
+
+            CATransaction.commit()
+        }
+    }
+
+    private func focus(_ controller: TerminalController) {
         if let surface = controller.focusedSurface {
             controller.focusSurface(surface)
         }
-        revision &+= 1
+    }
+
+    private func resetWindowPresentation(_ windows: [NSWindow]? = nil) {
+        let windows = windows ?? controllers.compactMap(\.window)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for window in windows {
+            guard let layer = window.contentView?.layer else { continue }
+            layer.removeAnimation(forKey: "customTabIncomingOpacity")
+            layer.removeAnimation(forKey: "customTabOutgoingOpacity")
+            layer.removeAnimation(forKey: "customTabIncomingPosition")
+            layer.removeAnimation(forKey: "customTabOutgoingPosition")
+            layer.opacity = 1
+            layer.transform = CATransform3DIdentity
+        }
+        CATransaction.commit()
     }
 
     func select(at index: Int) {
@@ -171,6 +326,24 @@ struct CustomTabBarView: View {
     let backgroundOpacity: Double
     let selectedTabBackgroundOpacity: Double
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Namespace private var selectedTabBackground
+
+    private var selectionAnimation: Animation? {
+        let style: Ghostty.Config.MacOSCustomTabSwitchAnimation
+        if accessibilityReduceMotion, group.switchAnimation == .spring {
+            style = .fade
+        } else {
+            style = group.switchAnimation
+        }
+
+        return switch style {
+        case .none: nil
+        case .fade: .easeInOut(duration: 0.12)
+        case .spring: .interactiveSpring(response: 0.24, dampingFraction: 0.86, blendDuration: 0.04)
+        }
+    }
+
     var body: some View {
         let controllers = group.controllers
 
@@ -187,12 +360,15 @@ struct CustomTabBarView: View {
                                 isEntering: group.enteringIDs.contains(candidate.customTabID),
                                 isClosing: group.closingIDs.contains(candidate.customTabID),
                                 selectedBackgroundOpacity: selectedTabBackgroundOpacity,
+                                selectionNamespace: selectedTabBackground,
+                                selectionAnimation: selectionAnimation,
                                 select: { group.select(candidate) },
                                 close: { candidate.closeTab(nil) })
                         }
                     }
                     .padding(.leading, 8)
                     .padding(.vertical, 5)
+                    .animation(selectionAnimation, value: group.selectedID)
                 }
 
                 Button(action: { controller.newTab(nil) }, label: {
@@ -225,6 +401,8 @@ private struct CustomTabButton: View {
     let isEntering: Bool
     let isClosing: Bool
     let selectedBackgroundOpacity: Double
+    let selectionNamespace: Namespace.ID
+    let selectionAnimation: Animation?
     let select: () -> Void
     let close: () -> Void
 
@@ -271,12 +449,15 @@ private struct CustomTabButton: View {
             .padding(.horizontal, 10)
             .frame(minWidth: 92, idealWidth: 150, maxWidth: 210, minHeight: 26)
             .background {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isSelected ? Color.primary.opacity(selectedBackgroundOpacity) : Color.clear)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(Color.primary.opacity(isSelected ? 0.10 : 0), lineWidth: 0.5)
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(selectedBackgroundOpacity))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
+                        }
+                        .matchedGeometryEffect(id: "selected-tab", in: selectionNamespace)
+                }
             }
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay {
@@ -317,7 +498,7 @@ private struct CustomTabButton: View {
         .allowsHitTesting(!isClosing)
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.08), value: isHovering)
-        .animation(.easeOut(duration: 0.08), value: isSelected)
+        .animation(selectionAnimation, value: isSelected)
         .accessibilityElement(children: .contain)
     }
 }
