@@ -191,35 +191,36 @@ private struct CustomTabButton: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            Button(action: select) {
-                HStack(spacing: 7) {
-                    Text(controller.customTabTitle)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 7) {
+                Text(controller.customTabTitle)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // Always reserve space so hover does not resize the title
-                    // or move the selection hit area underneath the pointer.
-                    Color.clear
-                        .frame(width: 16, height: 16)
-                }
-                .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .padding(.horizontal, 10)
-                .frame(minWidth: 92, idealWidth: 150, maxWidth: 210, minHeight: 26)
-                .background {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(isSelected ? Color.primary.opacity(selectedBackgroundOpacity) : Color.clear)
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.primary.opacity(isSelected ? 0.10 : 0), lineWidth: 0.5)
-                }
-                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                // Always reserve space so hover does not resize the title
+                // or move the selection hit area underneath the pointer.
+                Color.clear
+                    .frame(width: 16, height: 16)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(controller.customTabTitle)
-            .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+            .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+            .foregroundStyle(isSelected ? .primary : .secondary)
+            .padding(.horizontal, 10)
+            .frame(minWidth: 92, idealWidth: 150, maxWidth: 210, minHeight: 26)
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isSelected ? Color.primary.opacity(selectedBackgroundOpacity) : Color.clear)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.primary.opacity(isSelected ? 0.10 : 0), lineWidth: 0.5)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay {
+                CustomTabSelectionButton(
+                    action: select,
+                    accessibilityLabel: controller.customTabTitle,
+                    isSelected: isSelected)
+            }
 
             if isSelected || isHovering {
                 Button(action: close) {
@@ -237,6 +238,55 @@ private struct CustomTabButton: View {
         }
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// An AppKit button is used for tab selection so a click activates the tab
+/// even when the Ghostty window is not currently key. SwiftUI buttons consume
+/// that first click to activate the window on some macOS versions.
+private struct CustomTabSelectionButton: NSViewRepresentable {
+    let action: () -> Void
+    let accessibilityLabel: String
+    let isSelected: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = FirstMouseButton()
+        button.title = ""
+        button.isBordered = false
+        button.isTransparent = true
+        button.focusRingType = .none
+        button.refusesFirstResponder = true
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.selectTab)
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        button.setAccessibilityLabel(accessibilityLabel)
+        button.setAccessibilitySelected(isSelected)
+    }
+
+    final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        @objc func selectTab() {
+            action()
+        }
+    }
+
+    private final class FirstMouseButton: NSButton {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
     }
 }
 
