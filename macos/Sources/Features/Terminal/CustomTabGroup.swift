@@ -297,6 +297,14 @@ private struct CustomTabButton: View {
                 .help("Close Tab")
                 .padding(.trailing, 10)
                 .zIndex(1)
+            } else if controller.bell {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 5, height: 5)
+                    .frame(width: 16, height: 16)
+                    .padding(.trailing, 10)
+                    .help("Terminal needs attention")
+                    .accessibilityLabel("Terminal needs attention")
             }
         }
         .opacity(isEntering || isClosing ? 0 : 1)
