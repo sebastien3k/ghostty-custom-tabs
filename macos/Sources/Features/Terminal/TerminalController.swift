@@ -469,10 +469,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             controller.customTabGroup = group
             switch ghostty.config.windowNewTabPosition {
             case "end":
-                group.add(controller)
+                group.add(controller, animated: true)
             case "current": fallthrough
             default:
-                group.add(controller, after: parentController)
+                group.add(controller, after: parentController, animated: true)
             }
             customTabGroup = group
         } else {
@@ -758,9 +758,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         if let customTabGroup, customTabGroup.count > 1 {
             cancelPendingInitialPresentation()
-            customTabGroup.remove(self)
-            self.customTabGroup = nil
-            window.close()
+            customTabGroup.close(self) { [weak self, weak window] in
+                self?.customTabGroup = nil
+                window?.close()
+            }
             return
         }
 

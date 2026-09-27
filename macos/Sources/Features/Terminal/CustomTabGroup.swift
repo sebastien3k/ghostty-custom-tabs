@@ -15,6 +15,8 @@ final class CustomTabGroup: ObservableObject {
 
     @Published private(set) var revision: UInt = 0
     @Published private(set) var selectedID: UUID?
+    @Published private(set) var enteringIDs: Set<UUID> = []
+    @Published private(set) var closingIDs: Set<UUID> = []
 
     private var members: [Member] = []
 
@@ -30,7 +32,11 @@ final class CustomTabGroup: ObservableObject {
         controllers.contains { $0 === controller }
     }
 
-    func add(_ controller: TerminalController, after sibling: TerminalController? = nil) {
+    func add(
+        _ controller: TerminalController,
+        after sibling: TerminalController? = nil,
+        animated: Bool = false
+    ) {
         compact()
         guard !contains(controller) else { return }
 
@@ -46,6 +52,37 @@ final class CustomTabGroup: ObservableObject {
             selectedID = controller.customTabID
         }
         revision &+= 1
+
+        if animated {
+            enteringIDs.insert(controller.customTabID)
+            DispatchQueue.main.async { [weak self] in
+                withAnimation(.easeOut(duration: 0.16)) {
+                    self?.enteringIDs.remove(controller.customTabID)
+                }
+            }
+        }
+    }
+
+    /// Animate a user-initiated close before removing the controller and its
+    /// window. Structural removals such as detaching or closing a whole window
+    /// continue to use `remove` directly without waiting for animation.
+    @discardableResult
+    func close(_ controller: TerminalController, completion: @escaping () -> Void) -> Bool {
+        compact()
+        guard contains(controller), !closingIDs.contains(controller.customTabID) else { return false }
+
+        withAnimation(.easeIn(duration: 0.11)) {
+            closingIDs.insert(controller.customTabID)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) { [self] in
+            withAnimation(.easeOut(duration: 0.13)) {
+                remove(controller)
+                closingIDs.remove(controller.customTabID)
+            }
+            completion()
+        }
+        return true
     }
 
     func remove(_ controller: TerminalController, selectNeighbor: Bool = true) {
@@ -147,6 +184,8 @@ struct CustomTabBarView: View {
                             CustomTabButton(
                                 controller: candidate,
                                 isSelected: group.selectedID == candidate.customTabID,
+                                isEntering: group.enteringIDs.contains(candidate.customTabID),
+                                isClosing: group.closingIDs.contains(candidate.customTabID),
                                 selectedBackgroundOpacity: selectedTabBackgroundOpacity,
                                 select: { group.select(candidate) },
                                 close: { candidate.closeTab(nil) })
@@ -183,6 +222,8 @@ struct CustomTabBarView: View {
 private struct CustomTabButton: View {
     @ObservedObject var controller: TerminalController
     let isSelected: Bool
+    let isEntering: Bool
+    let isClosing: Bool
     let selectedBackgroundOpacity: Double
     let select: () -> Void
     let close: () -> Void
@@ -236,7 +277,14 @@ private struct CustomTabButton: View {
                 .zIndex(1)
             }
         }
+        .opacity(isEntering || isClosing ? 0 : 1)
+        .scaleEffect(isClosing ? 0.96 : (isEntering ? 0.98 : 1))
+        .animation(.easeOut(duration: 0.16), value: isEntering)
+        .animation(.easeIn(duration: 0.11), value: isClosing)
+        .allowsHitTesting(!isClosing)
         .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.08), value: isHovering)
+        .animation(.easeOut(duration: 0.08), value: isSelected)
         .accessibilityElement(children: .contain)
     }
 }
