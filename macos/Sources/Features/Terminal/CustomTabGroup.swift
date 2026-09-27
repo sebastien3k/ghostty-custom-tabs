@@ -190,15 +190,36 @@ private struct CustomTabButton: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 7) {
+        ZStack(alignment: .trailing) {
             Button(action: select) {
-                Text(controller.customTabTitle)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: 7) {
+                    Text(controller.customTabTitle)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Always reserve space so hover does not resize the title
+                    // or move the selection hit area underneath the pointer.
+                    Color.clear
+                        .frame(width: 16, height: 16)
+                }
+                .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                .foregroundStyle(isSelected ? .primary : .secondary)
+                .padding(.horizontal, 10)
+                .frame(minWidth: 92, idealWidth: 150, maxWidth: 210, minHeight: 26)
+                .background {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isSelected ? Color.primary.opacity(selectedBackgroundOpacity) : Color.clear)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.primary.opacity(isSelected ? 0.10 : 0), lineWidth: 0.5)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(controller.customTabTitle)
+            .accessibilityAddTraits(isSelected ? [.isSelected] : [])
 
             if isSelected || isHovering {
                 Button(action: close) {
@@ -210,25 +231,12 @@ private struct CustomTabButton: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help("Close Tab")
+                .padding(.trailing, 10)
+                .zIndex(1)
             }
         }
-        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-        .foregroundStyle(isSelected ? .primary : .secondary)
-        .padding(.horizontal, 10)
-        .frame(minWidth: 92, idealWidth: 150, maxWidth: 210, minHeight: 26)
-        .background {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? Color.primary.opacity(selectedBackgroundOpacity) : Color.clear)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .stroke(Color.primary.opacity(isSelected ? 0.10 : 0), lineWidth: 0.5)
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .onHover { isHovering = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(controller.customTabTitle)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityElement(children: .contain)
     }
 }
 
