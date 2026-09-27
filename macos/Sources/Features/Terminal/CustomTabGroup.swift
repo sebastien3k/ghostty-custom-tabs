@@ -250,6 +250,9 @@ private struct CustomTabButton: View {
                 if let icon = controller.customTabIcon {
                     Text(icon)
                         .font(iconFont)
+                        .fixedSize()
+                        .frame(minWidth: 14, minHeight: 14)
+                        .padding(.horizontal, 2)
                         .accessibilityHidden(true)
                 }
 
