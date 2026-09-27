@@ -163,6 +163,21 @@ struct ConfigTests {
         #expect(config.backgroundOpacity == 0.5)
     }
 
+    @Test func customTabBarOpacityDefaultsToBackgroundOpacity() throws {
+        let config = try TemporaryConfig("background-opacity = 0.5")
+        #expect(config.macosCustomTabBarBackgroundOpacity == 0.5)
+    }
+
+    @Test func customTabOpacitiesSetToCustom() throws {
+        let config = try TemporaryConfig("""
+        background-opacity = 0.4
+        macos-custom-tab-bar-background-opacity = 0.7
+        macos-custom-tab-background-opacity = 0.2
+        """)
+        #expect(config.macosCustomTabBarBackgroundOpacity == 0.7)
+        #expect(config.macosCustomTabBackgroundOpacity == 0.2)
+    }
+
     @Test func windowPositionDefaultsToNil() throws {
         let config = try TemporaryConfig("")
         #expect(config.windowPositionX == nil)

@@ -130,6 +130,9 @@ final class CustomTabGroup: ObservableObject {
 struct CustomTabBarView: View {
     @ObservedObject var group: CustomTabGroup
     @ObservedObject var controller: TerminalController
+    let backgroundColor: Color
+    let backgroundOpacity: Double
+    let selectedTabBackgroundOpacity: Double
 
     var body: some View {
         let controllers = group.controllers
@@ -144,6 +147,7 @@ struct CustomTabBarView: View {
                             CustomTabButton(
                                 controller: candidate,
                                 isSelected: group.selectedID == candidate.customTabID,
+                                selectedBackgroundOpacity: selectedTabBackgroundOpacity,
                                 select: { group.select(candidate) },
                                 close: { candidate.closeTab(nil) })
                         }
@@ -165,7 +169,7 @@ struct CustomTabBarView: View {
             }
         }
         .frame(height: 36)
-        .background(.ultraThinMaterial)
+        .background(backgroundColor.opacity(backgroundOpacity))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.primary.opacity(0.08))
@@ -179,6 +183,7 @@ struct CustomTabBarView: View {
 private struct CustomTabButton: View {
     @ObservedObject var controller: TerminalController
     let isSelected: Bool
+    let selectedBackgroundOpacity: Double
     let select: () -> Void
     let close: () -> Void
 
@@ -213,7 +218,7 @@ private struct CustomTabButton: View {
         .frame(minWidth: 92, idealWidth: 150, maxWidth: 210, minHeight: 26)
         .background {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? Color.primary.opacity(0.11) : Color.clear)
+                .fill(isSelected ? Color.primary.opacity(selectedBackgroundOpacity) : Color.clear)
         }
         .overlay {
             RoundedRectangle(cornerRadius: 7, style: .continuous)

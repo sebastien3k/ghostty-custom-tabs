@@ -361,6 +361,26 @@ extension Ghostty {
             return MacOSTitlebarStyle(rawValue: String(cString: ptr)) ?? defaultValue
         }
 
+        var macosCustomTabBarBackgroundOpacity: Double {
+            let defaultValue = backgroundOpacity
+            guard let config = self.config else { return defaultValue }
+            var value = defaultValue
+            let key = "macos-custom-tab-bar-background-opacity"
+            guard ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8))) else {
+                return defaultValue
+            }
+            return min(max(value, 0), 1)
+        }
+
+        var macosCustomTabBackgroundOpacity: Double {
+            let defaultValue = 0.11
+            guard let config = self.config else { return defaultValue }
+            var value = defaultValue
+            let key = "macos-custom-tab-background-opacity"
+            _ = ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return min(max(value, 0), 1)
+        }
+
         var macosTitlebarProxyIcon: MacOSTitlebarProxyIcon {
             let defaultValue = MacOSTitlebarProxyIcon.visible
             guard let config = self.config else { return defaultValue }

@@ -77,7 +77,10 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                        let customTabGroup = controller.customTabGroup {
                         CustomTabBarView(
                             group: customTabGroup,
-                            controller: controller)
+                            controller: controller,
+                            backgroundColor: ghostty.config.backgroundColor,
+                            backgroundOpacity: ghostty.config.macosCustomTabBarBackgroundOpacity,
+                            selectedTabBackgroundOpacity: ghostty.config.macosCustomTabBackgroundOpacity)
                     }
 
                     // If we're running in debug mode we show a warning so that users

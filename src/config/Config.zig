@@ -3403,6 +3403,26 @@ keybind: Keybinds = .{},
 /// Changing this option at runtime only applies to new windows.
 @"macos-titlebar-style": MacTitlebarStyle = .transparent,
 
+/// The opacity of the custom tab bar background used with
+/// `macos-titlebar-style = hidden`. The tab bar uses the terminal background
+/// color so it can blend cleanly into the terminal content.
+///
+/// A value of 1 is fully opaque and a value of 0 is fully transparent. Values
+/// outside this range are clamped. When unset, this inherits
+/// `background-opacity`.
+///
+/// This option only affects the custom hidden-titlebar tab bar on macOS.
+@"macos-custom-tab-bar-background-opacity": ?f64 = null,
+
+/// The opacity of the selected tab background in the custom tab bar used with
+/// `macos-titlebar-style = hidden`.
+///
+/// A value of 1 is fully opaque and a value of 0 is fully transparent. Values
+/// outside this range are clamped. The default is 0.11.
+///
+/// This option only affects the custom hidden-titlebar tab bar on macOS.
+@"macos-custom-tab-background-opacity": f64 = 0.11,
+
 /// Whether the proxy icon in the macOS titlebar is visible. The proxy icon
 /// is the icon that represents the folder of the current working directory.
 /// You can see this very clearly in the macOS built-in Terminal.app
