@@ -57,7 +57,7 @@ final class CustomTabGroup: ObservableObject {
             enteringIDs.insert(controller.customTabID)
             DispatchQueue.main.async { [weak self] in
                 withAnimation(.easeOut(duration: 0.16)) {
-                    self?.enteringIDs.remove(controller.customTabID)
+                    _ = self?.enteringIDs.remove(controller.customTabID)
                 }
             }
         }
@@ -72,7 +72,7 @@ final class CustomTabGroup: ObservableObject {
         guard contains(controller), !closingIDs.contains(controller.customTabID) else { return false }
 
         withAnimation(.easeIn(duration: 0.11)) {
-            closingIDs.insert(controller.customTabID)
+            _ = closingIDs.insert(controller.customTabID)
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) { [self] in
@@ -230,9 +230,29 @@ private struct CustomTabButton: View {
 
     @State private var isHovering = false
 
+    private var iconFont: Font {
+        let candidates = [
+            (controller.window as? TerminalWindow)?.titlebarFont?.fontName,
+            "Symbols Nerd Font Mono",
+            "CaskaydiaCove Nerd Font",
+            "JetBrainsMono Nerd Font",
+        ]
+
+        if let name = candidates.compactMap({ $0 }).first(where: { NSFont(name: $0, size: 11) != nil }) {
+            return .custom(name, size: 11)
+        }
+        return .system(size: 11)
+    }
+
     var body: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 7) {
+                if let icon = controller.customTabIcon {
+                    Text(icon)
+                        .font(iconFont)
+                        .accessibilityHidden(true)
+                }
+
                 Text(controller.customTabTitle)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -259,6 +279,8 @@ private struct CustomTabButton: View {
             .overlay {
                 CustomTabSelectionButton(
                     action: select,
+                    icon: controller.customTabIcon,
+                    setIcon: { controller.customTabIcon = $0 },
                     accessibilityLabel: controller.customTabTitle,
                     isSelected: isSelected)
             }
@@ -294,11 +316,13 @@ private struct CustomTabButton: View {
 /// that first click to activate the window on some macOS versions.
 private struct CustomTabSelectionButton: NSViewRepresentable {
     let action: () -> Void
+    let icon: String?
+    let setIcon: (String?) -> Void
     let accessibilityLabel: String
     let isSelected: Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(action: action)
+        Coordinator(action: action, setIcon: setIcon)
     }
 
     func makeNSView(context: Context) -> NSButton {
@@ -315,19 +339,98 @@ private struct CustomTabSelectionButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = action
+        context.coordinator.setIcon = setIcon
+        button.menu = context.coordinator.makeMenu(selectedIcon: icon)
         button.setAccessibilityLabel(accessibilityLabel)
         button.setAccessibilitySelected(isSelected)
     }
 
     final class Coordinator: NSObject {
-        var action: () -> Void
+        private struct IconChoice {
+            let name: String
+            let glyph: String
+        }
 
-        init(action: @escaping () -> Void) {
+        private static let choices = [
+            IconChoice(name: "Terminal", glyph: "\u{f489}"),
+            IconChoice(name: "Code", glyph: "\u{f121}"),
+            IconChoice(name: "Server", glyph: "\u{f233}"),
+            IconChoice(name: "Database", glyph: "\u{f1c0}"),
+            IconChoice(name: "Container", glyph: "\u{f308}"),
+            IconChoice(name: "Git Branch", glyph: "\u{e725}"),
+        ]
+
+        var action: () -> Void
+        var setIcon: (String?) -> Void
+
+        init(action: @escaping () -> Void, setIcon: @escaping (String?) -> Void) {
             self.action = action
+            self.setIcon = setIcon
         }
 
         @objc func selectTab() {
             action()
+        }
+
+        func makeMenu(selectedIcon: String?) -> NSMenu {
+            let menu = NSMenu(title: "Tab Icon")
+
+            for choice in Self.choices {
+                let item = NSMenuItem(
+                    title: choice.name,
+                    action: #selector(chooseIcon(_:)),
+                    keyEquivalent: "")
+                item.target = self
+                item.representedObject = choice.glyph
+                item.state = selectedIcon == choice.glyph ? .on : .off
+                menu.addItem(item)
+            }
+
+            menu.addItem(.separator())
+
+            let custom = NSMenuItem(
+                title: "Custom Glyph…",
+                action: #selector(chooseCustomIcon),
+                keyEquivalent: "")
+            custom.target = self
+            menu.addItem(custom)
+
+            let clear = NSMenuItem(
+                title: "Clear Icon",
+                action: #selector(clearIcon),
+                keyEquivalent: "")
+            clear.target = self
+            clear.isEnabled = selectedIcon != nil
+            menu.addItem(clear)
+
+            return menu
+        }
+
+        @objc private func chooseIcon(_ sender: NSMenuItem) {
+            guard let glyph = sender.representedObject as? String else { return }
+            setIcon(glyph)
+        }
+
+        @objc private func clearIcon() {
+            setIcon(nil)
+        }
+
+        @objc private func chooseCustomIcon() {
+            let alert = NSAlert()
+            alert.messageText = "Custom Tab Glyph"
+            alert.informativeText = "Paste one Nerd Font glyph. It applies only to this tab."
+            alert.addButton(withTitle: "Set Glyph")
+            alert.addButton(withTitle: "Cancel")
+
+            let input = NSTextField(string: "")
+            input.placeholderString = "Glyph"
+            input.frame = NSRect(x: 0, y: 0, width: 220, height: 24)
+            alert.accessoryView = input
+            alert.window.initialFirstResponder = input
+
+            guard alert.runModal() == .alertFirstButtonReturn,
+                  let glyph = input.stringValue.first else { return }
+            setIcon(String(glyph))
         }
     }
 

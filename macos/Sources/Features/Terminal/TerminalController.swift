@@ -63,6 +63,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     let customTabID = UUID()
     @Published var customTabGroup: CustomTabGroup?
     @Published private(set) var customTabTitle: String = "👻"
+    @Published var customTabIcon: String?
 
     /// The notification cancellable for focused surface property changes.
     private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
