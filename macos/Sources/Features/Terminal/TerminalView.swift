@@ -73,6 +73,13 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
         case .ready:
             ZStack {
                 VStack(spacing: 0) {
+                    if let controller = viewModel as? TerminalController,
+                       let customTabGroup = controller.customTabGroup {
+                        CustomTabBarView(
+                            group: customTabGroup,
+                            controller: controller)
+                    }
+
                     // If we're running in debug mode we show a warning so that users
                     // know that performance will be degraded.
                     if Ghostty.info.mode == GHOSTTY_BUILD_MODE_DEBUG || Ghostty.info.mode == GHOSTTY_BUILD_MODE_RELEASE_SAFE {

@@ -908,7 +908,7 @@ class BaseTerminalController: NSWindowController,
         return result
     }
 
-    private func titleDidChange(to: String) {
+    func titleDidChange(to: String) {
         lastComputedTitle = to
         applyTitleToWindow()
     }

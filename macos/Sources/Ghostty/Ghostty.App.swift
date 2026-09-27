@@ -1267,7 +1267,10 @@ extension Ghostty {
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
                     // See gotoTab for notes on this check.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    let customTabCount = (surfaceView.window?.windowController as? TerminalController)?
+                        .customTabGroup?.count ?? 0
+                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 ||
+                            customTabCount > 1 else { return false }
 
                     NotificationCenter.default.post(
                         name: .ghosttyMoveTab,
@@ -1298,6 +1301,12 @@ extension Ghostty {
 
                     // See gotoTab for notes on this check. A lone tab is already
                     // a window of its own, so there is nothing to move.
+                    if let controller = surfaceView.window?.windowController as? TerminalController,
+                       controller.customTabGroup?.count ?? 0 > 1 {
+                        controller.moveCustomTabToNewWindow()
+                        return true
+                    }
+
                     guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
 
                     surfaceView.window?.moveTabToNewWindow(nil)
@@ -1324,7 +1333,10 @@ extension Ghostty {
 
                     // Similar to goto_split (see comment there) about our performability,
                     // we should make this more accurate later.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    let customTabCount = (surfaceView.window?.windowController as? TerminalController)?
+                        .customTabGroup?.count ?? 0
+                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 ||
+                            customTabCount > 1 else { return false }
 
                     NotificationCenter.default.post(
                         name: Notification.ghosttyGotoTab,
