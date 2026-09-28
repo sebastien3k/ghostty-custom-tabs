@@ -285,10 +285,19 @@ private struct CustomTabSelectionButton: NSViewRepresentable {
             alert.addButton(withTitle: "Cancel")
 
             let input = NSTextField(string: "")
+            input.isEditable = true
+            input.isSelectable = true
             input.placeholderString = "Glyph"
             input.frame = NSRect(x: 0, y: 0, width: 220, height: 24)
             alert.accessoryView = input
             alert.window.initialFirstResponder = input
+
+            // NSAlert creates and activates its modal window during runModal().
+            // Make the field first responder after that session is active so
+            // standard AppKit editing commands, including Cmd+V, reach it.
+            DispatchQueue.main.async {
+                alert.window.makeFirstResponder(input)
+            }
 
             guard alert.runModal() == .alertFirstButtonReturn,
                   let glyph = input.stringValue.first else { return }
