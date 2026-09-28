@@ -58,12 +58,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// The configuration derived from the Ghostty config so we don't need to rely on references.
     private(set) var derivedConfig: DerivedConfig
 
-    /// Stable identity and presentation state for in-content tabs used by
-    /// hidden-titlebar windows.
-    let customTabID = UUID()
+    /// Window-owned terminal sessions used by hidden-titlebar windows.
     @Published var customTabGroup: CustomTabGroup?
-    @Published private(set) var customTabTitle: String = "👻"
-    @Published var customTabIcon: String?
 
     /// The notification cancellable for focused surface property changes.
     private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
@@ -85,6 +81,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         self.customTabGroup = nil
 
         super.init(ghostty, baseConfig: base, surfaceTree: tree)
+
+        if derivedConfig.macosTitlebarStyle == .hidden {
+            let initialSession = CustomTabSession(
+                ghostty: ghostty,
+                surfaceTree: surfaceTree,
+                focusedSurface: surfaceTree.first)
+            self.customTabGroup = CustomTabGroup(
+                host: self,
+                initialSession: initialSession,
+                switchAnimation: ghostty.config.macosCustomTabSwitchAnimation)
+        }
 
         // Setup our notifications for behaviors
         let center = NotificationCenter.default
@@ -179,6 +186,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     override func surfaceTreeDidChange(from: SplitTree<Ghostty.SurfaceView>, to: SplitTree<Ghostty.SurfaceView>) {
         super.surfaceTreeDidChange(from: from, to: to)
 
+        if let session = customTabGroup?.selectedSession {
+            session.surfaceTree = to
+            if let focusedSurface, to.contains(focusedSurface) {
+                session.focusedSurface = focusedSurface
+            }
+        }
+
         // Whenever our surface tree changes in any way (new split, close split, etc.)
         // we want to invalidate our state.
         invalidateRestorableState()
@@ -196,7 +210,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     override func titleDidChange(to title: String) {
         super.titleDidChange(to: title)
-        customTabTitle = title
+        customTabGroup?.selectedSession?.updateComputedTitle(title)
+    }
+
+    override func titleOverrideDidChange() {
+        customTabGroup?.selectedSession?.titleOverride = titleOverride
     }
 
     override func replaceSurfaceTree(
@@ -454,32 +472,15 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             return nil
         }
 
-        // Create a new window and add it to the parent. Hidden-titlebar
-        // windows use our in-content tab group because AppKit disables native
-        // tabs when the titlebar is removed.
+        if parentController.customTabGroup != nil {
+            parentController.addCustomTab(withBaseConfig: baseConfig)
+            return parentController
+        }
+
+        // Native macOS tabs continue to use one window per tab. Hidden-titlebar
+        // windows returned above and added a session to their persistent host.
         let controller = TerminalController.init(ghostty, withBaseConfig: baseConfig)
         controller.isBackgroundOpaque = parentController.isBackgroundOpaque
-        let customTabGroup: CustomTabGroup?
-        if parentController.derivedConfig.macosTitlebarStyle == .hidden {
-            let group = parentController.customTabGroup ?? CustomTabGroup(
-                switchAnimation: ghostty.config.macosCustomTabSwitchAnimation)
-            if parentController.customTabGroup == nil {
-                parentController.customTabGroup = group
-                group.add(parentController)
-            }
-
-            controller.customTabGroup = group
-            switch ghostty.config.windowNewTabPosition {
-            case "end":
-                group.add(controller, animated: true)
-            case "current": fallthrough
-            default:
-                group.add(controller, after: parentController, animated: true)
-            }
-            customTabGroup = group
-        } else {
-            customTabGroup = nil
-        }
         guard let window = controller.window else { return controller }
 
         // If the parent is miniaturized, then macOS exhibits really strange behaviors
@@ -493,14 +494,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         //
         // At the time of writing this code, the only known case this happens
         // is when the "+" button is clicked in the tab bar.
-        if customTabGroup == nil,
-           let tg = parent.tabGroup,
+        if let tg = parent.tabGroup,
            tg.windows.firstIndex(of: window) != nil {
             tg.removeWindow(window)
         }
 
         // If we don't allow tabs then we create a new window instead.
-        if customTabGroup == nil && window.tabbingMode != .disallowed {
+        if window.tabbingMode != .disallowed {
             let tabCreated: Bool
             // Add the window to the tab group and show it.
             switch ghostty.config.windowNewTabPosition {
@@ -533,30 +533,24 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // for HiddenTitlebarTerminalWindow.
         controller.showWindowSafely(self)
 
-        if let customTabGroup {
-            customTabGroup.select(controller, usingFrameFrom: parent)
-        }
-
         // Windows with `macos-titlebar-style = hidden` create new windows when the
         // new tab binding is pressed, we should cascade those windows as well.
 
         // We're dispatching this async because otherwise the lastCascadePoint doesn't
         // take effect after position in `showWindow`. Our best theory is there is some
         // next-event-loop-tick logic that Cocoa is doing that we need to be after.
-        if customTabGroup == nil {
-            controller.scheduleInitialPresentation {
-                // Only cascade if we aren't fullscreen and are alone in the tab group.
-                if !window.styleMask.contains(.fullScreen) &&
-                    window.tabGroup?.windows.count ?? 1 == 1 {
-                    let hasFixedPos = controller.derivedConfig.windowPositionX != nil &&
-                        controller.derivedConfig.windowPositionY != nil
-                    Self.applyCascade(to: window, hasFixedPos: hasFixedPos)
-                }
-
-                // We also activate our app so that it becomes front. This may be
-                // necessary for the dock menu.
-                NSApp.activate(ignoringOtherApps: true)
+        controller.scheduleInitialPresentation {
+            // Only cascade if we aren't fullscreen and are alone in the tab group.
+            if !window.styleMask.contains(.fullScreen) &&
+                window.tabGroup?.windows.count ?? 1 == 1 {
+                let hasFixedPos = controller.derivedConfig.windowPositionX != nil &&
+                    controller.derivedConfig.windowPositionY != nil
+                Self.applyCascade(to: window, hasFixedPos: hasFixedPos)
             }
+
+            // We also activate our app so that it becomes front. This may be
+            // necessary for the dock menu.
+            NSApp.activate(ignoringOtherApps: true)
         }
 
         // It takes an event loop cycle until the macOS tabGroup state becomes
@@ -596,6 +590,174 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     // MARK: - Methods
+
+    override func ownsSurface(_ surface: Ghostty.SurfaceView) -> Bool {
+        customTabGroup?.session(containing: surface) != nil || super.ownsSurface(surface)
+    }
+
+    override func closeOwnedSurface(
+        _ view: Ghostty.SurfaceView,
+        withConfirmation: Bool
+    ) {
+        guard !surfaceTree.contains(view),
+              let session = customTabGroup?.session(containing: view),
+              let node = session.surfaceTree.root?.node(view: view) else {
+            super.closeOwnedSurface(view, withConfirmation: withConfirmation)
+            return
+        }
+
+        if session.surfaceTree.root == node {
+            if withConfirmation {
+                closeCustomTab(session)
+            } else {
+                closeCustomTabImmediately(session)
+            }
+            return
+        }
+
+        let remove = { [weak self, weak session] in
+            guard let self, let session else { return }
+            let tree = session.surfaceTree
+            let nextFocus: Ghostty.SurfaceView? = if node.contains(where: { $0 == session.focusedSurface }) {
+                if tree.root?.leftmostLeaf() == node.leftmostLeaf() {
+                    tree.focusTarget(for: .next, from: node)
+                } else {
+                    tree.focusTarget(for: .previous, from: node)
+                }
+            } else {
+                session.focusedSurface
+            }
+
+            session.surfaceTree = tree.removing(node)
+            session.focusedSurface = nextFocus
+            for surface in node where !self.ownsSurface(surface) {
+                self.unregisterSurfaceOwnership(.init(view: surface))
+            }
+        }
+
+        guard withConfirmation else {
+            remove()
+            return
+        }
+
+        confirmClose(
+            messageText: "Close Terminal?",
+            informativeText: "The terminal still has a running process. If you close the terminal the process will be killed.",
+            completion: remove)
+    }
+
+    @discardableResult
+    func addCustomTab(
+        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil
+    ) -> CustomTabSession? {
+        guard let group = customTabGroup,
+              let ghosttyApp = ghostty.app else { return nil }
+
+        let surface = Ghostty.SurfaceView(ghosttyApp, baseConfig: baseConfig)
+        let session = CustomTabSession(
+            ghostty: ghostty,
+            surfaceTree: .init(view: surface),
+            focusedSurface: surface)
+
+        let sibling = ghostty.config.windowNewTabPosition == "end" ? nil : group.selectedSession
+        group.add(session, after: sibling, animated: true)
+        registerSurfaceOwnership(session.surfaceTree)
+        group.select(session)
+        return session
+    }
+
+    func activateCustomTab(
+        _ session: CustomTabSession,
+        replacing previous: CustomTabSession?
+    ) {
+        if let previous {
+            previous.surfaceTree = surfaceTree
+            previous.focusedSurface = focusedSurface
+            previous.titleOverride = titleOverride
+            for surface in previous.surfaceTree {
+                surface.focusDidChange(false)
+            }
+            setOcclusionState(false, for: previous.surfaceTree)
+        }
+
+        surfaceTree = session.surfaceTree
+        titleOverride = session.titleOverride
+        focusedSurfaceDidChange(to: session.focusedSurface ?? session.surfaceTree.first)
+        syncAppearance()
+        focusSelectedCustomTab()
+    }
+
+    func focusSelectedCustomTab() {
+        guard let focusedSurface else { return }
+        DispatchQueue.main.async { [weak self, weak focusedSurface] in
+            guard let self, let focusedSurface else { return }
+            self.focusSurface(focusedSurface)
+        }
+    }
+
+    func closeCustomTab(_ session: CustomTabSession) {
+        guard let group = customTabGroup, group.contains(session) else { return }
+        guard group.count > 1 else {
+            closeWindow(nil)
+            return
+        }
+
+        let close = { [weak self, weak session] in
+            guard let self, let session else { return }
+            self.closeCustomTabImmediately(session)
+        }
+
+        guard session.surfaceTree.contains(where: { $0.needsConfirmQuit }) else {
+            close()
+            return
+        }
+
+        confirmClose(
+            messageText: "Close Tab?",
+            informativeText: "The terminal still has a running process. If you close the tab the process will be killed.",
+            completion: close)
+    }
+
+    func closeCustomTabImmediately(_ session: CustomTabSession) {
+        customTabGroup?.close(session)
+    }
+
+    func customTabDidRemove(_ session: CustomTabSession) {
+        unregisterSurfaceOwnership(session.surfaceTree)
+    }
+
+    func restoreCustomTabs(
+        _ savedTabs: [TerminalRestorableState.CustomTabState<Ghostty.SurfaceView>]?,
+        selectedIndex: Int?,
+        selectedIcon: String?
+    ) {
+        guard let group = customTabGroup,
+              let selected = group.selectedSession else { return }
+
+        selected.icon = selectedIcon
+        guard let savedTabs, !savedTabs.isEmpty else { return }
+
+        var indexedSessions = savedTabs.map { saved in
+            let focused = saved.focusedSurface.flatMap { focusedID in
+                saved.surfaceTree.first { $0.id.uuidString == focusedID }
+            }
+            let session = CustomTabSession(
+                ghostty: ghostty,
+                surfaceTree: saved.surfaceTree,
+                focusedSurface: focused)
+            session.titleOverride = saved.titleOverride
+            session.icon = saved.icon
+            registerSurfaceOwnership(session.surfaceTree)
+            setOcclusionState(false, for: session.surfaceTree)
+            return (saved.index, session)
+        }
+
+        indexedSessions.append((selectedIndex ?? 0, selected))
+        indexedSessions.sort { lhs, rhs in lhs.0 < rhs.0 }
+        group.restore(
+            sessions: indexedSessions.map(\.1),
+            selected: selected)
+    }
 
     @objc private func ghosttyConfigDidChange(_ notification: Notification) {
         // Get our managed configuration object out
@@ -761,10 +923,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         if let customTabGroup, customTabGroup.count > 1 {
             cancelPendingInitialPresentation()
-            customTabGroup.close(self) { [weak self, weak window] in
-                self?.customTabGroup = nil
-                window?.close()
-            }
+            guard let session = customTabGroup.selectedSession else { return }
+            closeCustomTabImmediately(session)
             return
         }
 
@@ -1148,17 +1308,6 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // use whatever the latest app-level config is.
         let config = ghostty.config
 
-        // Hidden titlebars cannot participate in AppKit's native tab groups.
-        // Give these windows an in-content group while keeping every tab as an
-        // independent TerminalController and Ghostty surface tree.
-        if derivedConfig.macosTitlebarStyle == .hidden,
-           customTabGroup == nil {
-            let group = CustomTabGroup(
-                switchAnimation: config.macosCustomTabSwitchAnimation)
-            customTabGroup = group
-            group.add(self)
-        }
-
         // Setting all three of these is required for restoration to work.
         window.isRestorable = restorable
         if restorable {
@@ -1275,17 +1424,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     func moveCustomTabToNewWindow() {
         guard let group = customTabGroup,
               group.count > 1,
+              let session = group.selectedSession,
               let window else { return }
 
         let frame = window.frame
-        group.remove(self)
-
-        let detachedGroup = CustomTabGroup(
-            switchAnimation: ghostty.config.macosCustomTabSwitchAnimation)
-        customTabGroup = detachedGroup
-        detachedGroup.add(self)
-        window.setFrame(frame, display: true)
-        detachedGroup.select(self, usingFrameFrom: window)
+        let detached = TerminalController(
+            ghostty,
+            withSurfaceTree: session.surfaceTree,
+            parent: window)
+        detached.titleOverride = session.titleOverride
+        group.remove(session)
+        detached.window?.setFrame(frame, display: false)
+        detached.showWindow(nil)
     }
 
     // MARK: NSWindowDelegate
@@ -1294,11 +1444,6 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     lazy private(set) var tabGroupCloseCoordinator = TabGroupCloseCoordinator()
 
     override func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if customTabGroup?.count ?? 0 > 1 {
-            closeTab(nil)
-            return false
-        }
-
         tabGroupCloseCoordinator.windowShouldClose(sender) { [weak self] scope in
             guard let self else { return }
             switch scope {
@@ -1316,7 +1461,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     override func windowWillClose(_ notification: Notification) {
         super.windowWillClose(notification)
         cancelPendingInitialPresentation()
-        customTabGroup?.remove(self)
+        if let customTabGroup {
+            for session in customTabGroup.sessions {
+                unregisterSurfaceOwnership(session.surfaceTree)
+            }
+        }
         customTabGroup = nil
         self.relabelTabs()
 
@@ -1444,21 +1593,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     @IBAction func closeOtherTabs(_ sender: Any?) {
         if let customTabGroup, customTabGroup.count > 1 {
-            let others = customTabGroup.controllers.filter { $0 !== self }
+            let others = customTabGroup.sessions.filter { $0 !== customTabGroup.selectedSession }
             guard !others.contains(where: { $0.surfaceTree.contains(where: { $0.needsConfirmQuit }) }) else {
                 confirmClose(
                     messageText: "Close Other Tabs?",
                     informativeText: "At least one other tab still has a running process. If you close the tab the process will be killed."
                 ) {
-                    for controller in others {
-                        controller.closeTabImmediately(registerRedo: false)
+                    for session in others {
+                        self.closeCustomTabImmediately(session)
                     }
                 }
                 return
             }
 
-            for controller in others {
-                controller.closeTabImmediately(registerRedo: false)
+            for session in others {
+                closeCustomTabImmediately(session)
             }
             return
         }
@@ -1496,8 +1645,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     @IBAction func closeTabsOnTheRight(_ sender: Any?) {
         if let customTabGroup,
-           let currentIndex = customTabGroup.controllers.firstIndex(where: { $0 === self }) {
-            let tabsToClose = Array(customTabGroup.controllers.dropFirst(currentIndex + 1))
+           let selectedSession = customTabGroup.selectedSession,
+           let currentIndex = customTabGroup.sessions.firstIndex(where: { $0 === selectedSession }) {
+            let tabsToClose = Array(customTabGroup.sessions.dropFirst(currentIndex + 1))
             guard !tabsToClose.isEmpty else { return }
 
             guard !tabsToClose.contains(where: { $0.surfaceTree.contains(where: { $0.needsConfirmQuit }) }) else {
@@ -1505,15 +1655,15 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                     messageText: "Close Tabs on the Right?",
                     informativeText: "At least one tab to the right still has a running process. If you close the tab the process will be killed."
                 ) {
-                    for controller in tabsToClose {
-                        controller.closeTabImmediately(registerRedo: false)
+                    for session in tabsToClose {
+                        self.closeCustomTabImmediately(session)
                     }
                 }
                 return
             }
 
-            for controller in tabsToClose {
-                controller.closeTabImmediately(registerRedo: false)
+            for session in tabsToClose {
+                closeCustomTabImmediately(session)
             }
             return
         }
@@ -1584,8 +1734,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         guard let window = window else { return }
 
         if let customTabGroup, customTabGroup.count > 1 {
-            let controllers = customTabGroup.controllers
-            let needsConfirmation = controllers.contains {
+            let sessions = customTabGroup.sessions
+            let needsConfirmation = sessions.contains {
                 $0.surfaceTree.contains(where: { $0.needsConfirmQuit })
             }
             guard needsConfirmation else {
@@ -1644,13 +1794,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     private func closeCustomTabGroupImmediately(_ group: CustomTabGroup) {
-        let controllers = group.controllers
-        for controller in controllers {
-            controller.cancelPendingInitialPresentation()
-            group.remove(controller, selectNeighbor: false)
-            controller.customTabGroup = nil
-            controller.window?.close()
+        cancelPendingInitialPresentation()
+        for session in group.sessions {
+            unregisterSurfaceOwnership(session.surfaceTree)
         }
+        customTabGroup = nil
+        closeWindowImmediately()
     }
 
     private func reviewWindows(_ controllers: [TerminalController], window: NSWindow) async {
@@ -1727,7 +1876,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         guard action.amount != 0 else { return }
 
         if let customTabGroup, customTabGroup.count > 1 {
-            customTabGroup.move(self, by: action.amount)
+            guard let session = customTabGroup.selectedSession else { return }
+            customTabGroup.move(session, by: action.amount)
             return
         }
 
@@ -1796,22 +1946,23 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         let tabIndex: Int32 = tabEnum.rawValue
 
         if let customTabGroup, customTabGroup.count > 1 {
-            let controllers = customTabGroup.controllers
-            guard let selectedIndex = controllers.firstIndex(where: { $0 === self }) else { return }
+            let sessions = customTabGroup.sessions
+            guard let selectedSession = customTabGroup.selectedSession,
+                  let selectedIndex = sessions.firstIndex(where: { $0 === selectedSession }) else { return }
 
             let finalIndex: Int
             if tabIndex <= 0 {
                 if tabIndex == GHOSTTY_GOTO_TAB_PREVIOUS.rawValue {
-                    finalIndex = selectedIndex == 0 ? controllers.count - 1 : selectedIndex - 1
+                    finalIndex = selectedIndex == 0 ? sessions.count - 1 : selectedIndex - 1
                 } else if tabIndex == GHOSTTY_GOTO_TAB_NEXT.rawValue {
-                    finalIndex = selectedIndex == controllers.count - 1 ? 0 : selectedIndex + 1
+                    finalIndex = selectedIndex == sessions.count - 1 ? 0 : selectedIndex + 1
                 } else if tabIndex == GHOSTTY_GOTO_TAB_LAST.rawValue {
-                    finalIndex = controllers.count - 1
+                    finalIndex = sessions.count - 1
                 } else {
                     return
                 }
             } else {
-                finalIndex = min(Int(tabIndex - 1), controllers.count - 1)
+                finalIndex = min(Int(tabIndex - 1), sessions.count - 1)
             }
 
             customTabGroup.select(at: finalIndex)
@@ -1942,8 +2093,9 @@ extension TerminalController {
         switch item.action {
         case #selector(closeTabsOnTheRight):
             if let customTabGroup,
-               let currentIndex = customTabGroup.controllers.firstIndex(where: { $0 === self }) {
-                return customTabGroup.controllers.indices.contains { $0 > currentIndex }
+               let selectedSession = customTabGroup.selectedSession,
+               let currentIndex = customTabGroup.sessions.firstIndex(where: { $0 === selectedSession }) {
+                return customTabGroup.sessions.indices.contains { $0 > currentIndex }
             }
 
             guard let window, let tabGroup = window.tabGroup else { return false }

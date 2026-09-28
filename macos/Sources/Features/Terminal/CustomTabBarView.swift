@@ -28,30 +28,43 @@ struct CustomTabBarView: View {
     }
 
     var body: some View {
-        let controllers = group.controllers
+        let sessions = group.sessions
 
         ZStack {
             CustomTabWindowDragRegion()
 
             HStack(spacing: 6) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 3) {
-                        ForEach(controllers, id: \.customTabID) { candidate in
-                            CustomTabButton(
-                                controller: candidate,
-                                isSelected: group.selectedID == candidate.customTabID,
-                                isEntering: group.enteringIDs.contains(candidate.customTabID),
-                                isClosing: group.closingIDs.contains(candidate.customTabID),
-                                selectedBackgroundOpacity: selectedTabBackgroundOpacity,
-                                selectionNamespace: selectedTabBackground,
-                                selectionAnimation: selectionAnimation,
-                                select: { group.select(candidate) },
-                                close: { candidate.closeTab(nil) })
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 3) {
+                            ForEach(sessions) { session in
+                                CustomTabButton(
+                                    session: session,
+                                    isSelected: group.selectedID == session.id,
+                                    isEntering: group.enteringIDs.contains(session.id),
+                                    isClosing: group.closingIDs.contains(session.id),
+                                    selectedBackgroundOpacity: selectedTabBackgroundOpacity,
+                                    selectionNamespace: selectedTabBackground,
+                                    selectionAnimation: selectionAnimation,
+                                    select: { group.select(session) },
+                                    setIcon: {
+                                        session.icon = $0
+                                        controller.window?.invalidateRestorableState()
+                                    },
+                                    close: { controller.closeCustomTab(session) })
+                                .id(session.id)
+                            }
+                        }
+                        .padding(.leading, 8)
+                        .padding(.vertical, 5)
+                        .animation(selectionAnimation, value: group.selectedID)
+                    }
+                    .onChange(of: group.selectedID) { selectedID in
+                        guard let selectedID else { return }
+                        withAnimation(selectionAnimation) {
+                            proxy.scrollTo(selectedID, anchor: .center)
                         }
                     }
-                    .padding(.leading, 8)
-                    .padding(.vertical, 5)
-                    .animation(selectionAnimation, value: group.selectedID)
                 }
 
                 Button(action: { controller.newTab(nil) }, label: {
@@ -79,7 +92,7 @@ struct CustomTabBarView: View {
 }
 
 private struct CustomTabButton: View {
-    @ObservedObject var controller: TerminalController
+    @ObservedObject var session: CustomTabSession
     let isSelected: Bool
     let isEntering: Bool
     let isClosing: Bool
@@ -87,6 +100,7 @@ private struct CustomTabButton: View {
     let selectionNamespace: Namespace.ID
     let selectionAnimation: Animation?
     let select: () -> Void
+    let setIcon: (String?) -> Void
     let close: () -> Void
 
     @State private var isHovering = false
@@ -94,7 +108,7 @@ private struct CustomTabButton: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 7) {
-                if let icon = controller.customTabIcon {
+                if let icon = session.icon {
                     CustomTabIconView(
                         icon: icon,
                         fontName: CustomTabIconFont.name,
@@ -104,7 +118,7 @@ private struct CustomTabButton: View {
                         .accessibilityHidden(true)
                 }
 
-                Text(controller.customTabTitle)
+                Text(session.title)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,9 +147,9 @@ private struct CustomTabButton: View {
             .overlay {
                 CustomTabSelectionButton(
                     action: select,
-                    icon: controller.customTabIcon,
-                    setIcon: { controller.customTabIcon = $0 },
-                    accessibilityLabel: controller.customTabTitle,
+                    icon: session.icon,
+                    setIcon: setIcon,
+                    accessibilityLabel: session.title,
                     isSelected: isSelected)
             }
 
@@ -151,7 +165,7 @@ private struct CustomTabButton: View {
                 .help("Close Tab")
                 .padding(.trailing, 10)
                 .zIndex(1)
-            } else if controller.bell {
+            } else if session.bell {
                 Circle()
                     .fill(Color.accentColor)
                     .frame(width: 5, height: 5)
@@ -287,8 +301,18 @@ private struct CustomTabSelectionButton: NSViewRepresentable {
             let input = NSTextField(string: "")
             input.placeholderString = "Glyph"
             input.frame = NSRect(x: 0, y: 0, width: 220, height: 24)
+            input.isEditable = true
+            input.isSelectable = true
             alert.accessoryView = input
             alert.window.initialFirstResponder = input
+
+            // `initialFirstResponder` is consulted while the alert window is
+            // being assembled, before its modal session owns the key window.
+            // Reassert the field after `runModal` starts so standard AppKit
+            // edit commands, including Paste, reach its field editor.
+            DispatchQueue.main.async {
+                alert.window.makeFirstResponder(input)
+            }
 
             guard alert.runModal() == .alertFirstButtonReturn,
                   let glyph = input.stringValue.first else { return }

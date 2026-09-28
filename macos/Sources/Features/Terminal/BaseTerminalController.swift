@@ -103,7 +103,10 @@ class BaseTerminalController: NSWindowController,
     /// An override title for the tab/window set by the user via prompt_tab_title.
     /// When set, this takes precedence over the computed title from the terminal.
     var titleOverride: String? {
-        didSet { applyTitleToWindow() }
+        didSet {
+            applyTitleToWindow()
+            titleOverrideDidChange()
+        }
     }
 
     /// The last computed title from the focused surface (without the override).
@@ -247,18 +250,36 @@ class BaseTerminalController: NSWindowController,
     /// view relationship.
     static func controller(owning surface: Ghostty.SurfaceView) -> BaseTerminalController? {
         if let controller = surfaceControllers.object(forKey: surface),
-           controller.surfaceTree.contains(surface) {
+           controller.ownsSurface(surface) {
             return controller
         }
 
         if let controller = surface.window?.windowController as? BaseTerminalController,
-           controller.surfaceTree.contains(surface) {
+           controller.ownsSurface(surface) {
             return controller
         }
 
         return NSApp.windows
             .compactMap { $0.windowController as? BaseTerminalController }
-            .first { $0.surfaceTree.contains(surface) }
+            .first { $0.ownsSurface(surface) }
+    }
+
+    /// Whether this controller owns a surface, including surfaces that are not
+    /// currently mounted in its window.
+    func ownsSurface(_ surface: Ghostty.SurfaceView) -> Bool {
+        surfaceTree.contains(surface)
+    }
+
+    func registerSurfaceOwnership(_ tree: SplitTree<Ghostty.SurfaceView>) {
+        for surface in tree {
+            Self.surfaceControllers.setObject(self, forKey: surface)
+        }
+    }
+
+    func unregisterSurfaceOwnership(_ tree: SplitTree<Ghostty.SurfaceView>) {
+        for surface in tree where Self.surfaceControllers.object(forKey: surface) === self {
+            Self.surfaceControllers.removeObject(forKey: surface)
+        }
     }
 
     private static func updateSurfaceControllers(
@@ -266,7 +287,7 @@ class BaseTerminalController: NSWindowController,
         from oldTree: SplitTree<Ghostty.SurfaceView>,
         to newTree: SplitTree<Ghostty.SurfaceView>
     ) {
-        for surface in oldTree where !newTree.contains(surface) {
+        for surface in oldTree where !newTree.contains(surface) && !controller.ownsSurface(surface) {
             if surfaceControllers.object(forKey: surface) === controller {
                 surfaceControllers.removeObject(forKey: surface)
             }
@@ -334,7 +355,7 @@ class BaseTerminalController: NSWindowController,
     ///
     /// Subclasses should call super first.
     func surfaceTreeDidChange(from: SplitTree<Ghostty.SurfaceView>, to: SplitTree<Ghostty.SurfaceView>) {
-        for surfaceView in from where !to.contains(surfaceView) {
+        for surfaceView in from where !to.contains(surfaceView) && !ownsSurface(surfaceView) {
             cancelPendingClipboardConfirmation(for: surfaceView)
         }
 
@@ -461,6 +482,15 @@ class BaseTerminalController: NSWindowController,
     ) {
         guard let node = surfaceTree.root?.node(view: view) else { return }
         closeSurface(node, withConfirmation: withConfirmation)
+    }
+
+    /// Close a surface owned by this controller. Subclasses may own surfaces
+    /// that are not currently mounted in `surfaceTree`.
+    func closeOwnedSurface(
+        _ view: Ghostty.SurfaceView,
+        withConfirmation: Bool
+    ) {
+        closeSurface(view, withConfirmation: withConfirmation)
     }
 
     /// Close a surface node (which may contain splits), requesting confirmation if necessary.
@@ -657,9 +687,9 @@ class BaseTerminalController: NSWindowController,
 
     @objc private func ghosttyDidCloseSurface(_ notification: Notification) {
         guard let target = notification.object as? Ghostty.SurfaceView else { return }
-        guard let node = surfaceTree.root?.node(view: target) else { return }
-        closeSurface(
-            node,
+        guard ownsSurface(target) else { return }
+        closeOwnedSurface(
+            target,
             withConfirmation: (notification.userInfo?["process_alive"] as? Bool) ?? false)
     }
 
@@ -912,6 +942,8 @@ class BaseTerminalController: NSWindowController,
         lastComputedTitle = to
         applyTitleToWindow()
     }
+
+    func titleOverrideDidChange() {}
 
     private func applyTitleToWindow() {
         guard let window else { return }
@@ -1282,14 +1314,21 @@ class BaseTerminalController: NSWindowController,
         syncSurfaceTreeOcclusionState()
     }
 
-    private func syncSurfaceTreeOcclusionState() {
-        let visible = self.window?.occlusionState.contains(.visible) ?? false
-        for view in surfaceTree {
+    func setOcclusionState(
+        _ visible: Bool,
+        for tree: SplitTree<Ghostty.SurfaceView>
+    ) {
+        for view in tree {
             if let surface = view.surface, view.isWindowVisible != visible {
                 ghostty_surface_set_occlusion(surface, visible)
                 view.isWindowVisible = visible
             }
         }
+    }
+
+    private func syncSurfaceTreeOcclusionState() {
+        let visible = self.window?.occlusionState.contains(.visible) ?? false
+        setOcclusionState(visible, for: surfaceTree)
     }
 
     func windowDidResize(_ notification: Notification) {

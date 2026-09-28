@@ -58,7 +58,7 @@ extension TerminalRestorable {
 
 /// The state stored for terminal window restoration.
 final class TerminalRestorableState: TerminalRestorable {
-    static var version: Int { 7 }
+    static var version: Int { 8 }
     static var minimumVersion: Int { 5 }
 
     var focusedSurface: String? {
@@ -75,6 +75,15 @@ final class TerminalRestorableState: TerminalRestorable {
     }
     var titleOverride: String? {
         internalState.titleOverride
+    }
+    var customTabs: [CustomTabState<Ghostty.SurfaceView>]? {
+        internalState.customTabs
+    }
+    var selectedCustomTabIndex: Int? {
+        internalState.selectedCustomTabIndex
+    }
+    var selectedCustomTabIcon: String? {
+        internalState.selectedCustomTabIcon
     }
 
     /// Internal State we use to perform unit tests
@@ -168,6 +177,11 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             (window as? TerminalWindow)?.tabColor = tabColor
         }
 
+        c.restoreCustomTabs(
+            state.customTabs,
+            selectedIndex: state.selectedCustomTabIndex,
+            selectedIcon: state.selectedCustomTabIcon)
+
         // Restore the tab title override
         c.titleOverride = state.titleOverride
 
@@ -233,4 +247,3 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         }
     }
 }
-
