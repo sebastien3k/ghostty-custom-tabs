@@ -145,8 +145,8 @@ final class CustomTabGroup: ObservableObject {
            !targetWindow.styleMask.contains(.fullScreen),
            let sourceIndex,
            let targetIndex,
-           source.contentView?.layer != nil,
-           targetWindow.contentView?.layer != nil {
+           transitionLayer(for: source) != nil,
+           transitionLayer(for: targetWindow) != nil {
             let direction: CGFloat = targetIndex > sourceIndex ? 1 : -1
             animateSelection(
                 from: source,
@@ -180,8 +180,8 @@ final class CustomTabGroup: ObservableObject {
         transition: Ghostty.Config.MacOSCustomTabSwitchAnimation,
         generation: UInt
     ) {
-        guard let sourceLayer = sourceWindow.contentView?.layer,
-              let targetLayer = targetWindow.contentView?.layer else { return }
+        guard let sourceLayer = transitionLayer(for: sourceWindow),
+              let targetLayer = transitionLayer(for: targetWindow) else { return }
         let incomingOffset: CGFloat = transition == .spring ? direction * 12 : 0
 
         CATransaction.begin()
@@ -264,12 +264,16 @@ final class CustomTabGroup: ObservableObject {
         }
     }
 
+    private func transitionLayer(for window: NSWindow) -> CALayer? {
+        (window.contentView as? TerminalViewContainer)?.customTabTransitionLayer
+    }
+
     private func resetWindowPresentation(_ windows: [NSWindow]? = nil) {
         let windows = windows ?? controllers.compactMap(\.window)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for window in windows {
-            guard let layer = window.contentView?.layer else { continue }
+            guard let layer = transitionLayer(for: window) else { continue }
             layer.removeAnimation(forKey: "customTabIncomingOpacity")
             layer.removeAnimation(forKey: "customTabOutgoingOpacity")
             layer.removeAnimation(forKey: "customTabIncomingPosition")

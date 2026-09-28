@@ -6,6 +6,13 @@ import SwiftUI
 class TerminalViewContainer: NSView {
     private let terminalView: NSView
 
+    /// The foreground view used for custom-tab transitions. Keeping this
+    /// separate from the container prevents window blur and glass backgrounds
+    /// from fading or translating when tabs change.
+    var customTabTransitionLayer: CALayer? {
+        terminalView.layer
+    }
+
     /// Background color applied with glass effect
     private(set) var glassEffectView: NSView?
     private var derivedConfig: DerivedConfig?
@@ -53,6 +60,7 @@ class TerminalViewContainer: NSView {
     }
 
     private func setup() {
+        terminalView.wantsLayer = true
         addSubview(terminalView)
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
