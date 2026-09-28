@@ -3429,15 +3429,14 @@ keybind: Keybinds = .{},
 ///
 /// Valid values are:
 ///
-///   * `slide` - A coordinated directional slide with a restrained crossfade.
 ///   * `spring` - A short directional transition with a lightly damped finish.
 ///   * `fade` - Crossfade between terminal contents without movement.
 ///   * `none` - Switch immediately without animation.
 ///
-/// The default is `slide`.
+/// The default is `spring`.
 ///
 /// This option only affects the custom hidden-titlebar tab bar on macOS.
-@"macos-custom-tab-switch-animation": MacCustomTabSwitchAnimation = .slide,
+@"macos-custom-tab-switch-animation": MacCustomTabSwitchAnimation = .spring,
 
 /// Whether the proxy icon in the macOS titlebar is visible. The proxy icon
 /// is the icon that represents the folder of the current working directory.
@@ -9248,7 +9247,6 @@ pub const MacCustomTabSwitchAnimation = enum {
     none,
     fade,
     spring,
-    slide,
 };
 
 /// See macos-titlebar-proxy-icon

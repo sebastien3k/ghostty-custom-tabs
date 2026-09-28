@@ -382,7 +382,7 @@ extension Ghostty {
         }
 
         var macosCustomTabSwitchAnimation: MacOSCustomTabSwitchAnimation {
-            let defaultValue = MacOSCustomTabSwitchAnimation.slide
+            let defaultValue = MacOSCustomTabSwitchAnimation.spring
             guard let config = self.config else { return defaultValue }
             var v: UnsafePointer<Int8>?
             let key = "macos-custom-tab-switch-animation"
@@ -950,7 +950,7 @@ extension Ghostty.Config {
     }
 
     enum MacOSCustomTabSwitchAnimation: String {
-        case none, fade, spring, slide
+        case none, fade, spring
     }
 
     enum DragHandle: String {

@@ -14,7 +14,7 @@ struct CustomTabBarView: View {
     private var selectionAnimation: Animation? {
         let style: Ghostty.Config.MacOSCustomTabSwitchAnimation
         if accessibilityReduceMotion,
-           group.switchAnimation == .spring || group.switchAnimation == .slide {
+           group.switchAnimation == .spring {
             style = .fade
         } else {
             style = group.switchAnimation
@@ -24,7 +24,6 @@ struct CustomTabBarView: View {
         case .none: nil
         case .fade: .easeInOut(duration: 0.12)
         case .spring: .interactiveSpring(response: 0.24, dampingFraction: 0.86, blendDuration: 0.04)
-        case .slide: .interactiveSpring(response: 0.20, dampingFraction: 0.92, blendDuration: 0.03)
         }
     }
 

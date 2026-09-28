@@ -23,7 +23,7 @@ final class CustomTabGroup: ObservableObject {
 
     var switchAnimation: Ghostty.Config.MacOSCustomTabSwitchAnimation
 
-    init(switchAnimation: Ghostty.Config.MacOSCustomTabSwitchAnimation = .slide) {
+    init(switchAnimation: Ghostty.Config.MacOSCustomTabSwitchAnimation = .spring) {
         self.switchAnimation = switchAnimation
     }
 
@@ -167,7 +167,7 @@ final class CustomTabGroup: ObservableObject {
 
     private var resolvedSwitchAnimation: Ghostty.Config.MacOSCustomTabSwitchAnimation {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
-           switchAnimation == .spring || switchAnimation == .slide {
+           switchAnimation == .spring {
             return .fade
         }
         return switchAnimation
@@ -182,11 +182,7 @@ final class CustomTabGroup: ObservableObject {
     ) {
         guard let sourceLayer = sourceWindow.contentView?.layer,
               let targetLayer = targetWindow.contentView?.layer else { return }
-        let incomingOffset: CGFloat = switch transition {
-        case .spring: direction * 12
-        case .slide: direction * 10
-        case .fade, .none: 0
-        }
+        let incomingOffset: CGFloat = transition == .spring ? direction * 12 : 0
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -207,27 +203,18 @@ final class CustomTabGroup: ObservableObject {
                   generation == selectionTransitionGeneration,
                   selectedID == (targetWindow.windowController as? TerminalController)?.customTabID else { return }
 
-            let opacityDuration: CFTimeInterval = switch transition {
-            case .spring: 0.14
-            case .fade: 0.12
-            case .slide: 0.18
-            case .none: 0
-            }
-            let opacityTiming = transition == .slide
-                ? CAMediaTimingFunction(controlPoints: 0.22, 0.75, 0.18, 1)
-                : CAMediaTimingFunction(name: .easeInEaseOut)
-            let incomingStartOpacity: Float = transition == .slide ? 0.82 : 0
-            let outgoingEndOpacity: Float = transition == .slide ? 0.82 : 0
+            let opacityDuration = transition == .spring ? 0.14 : 0.12
+            let opacityTiming = CAMediaTimingFunction(name: .easeInEaseOut)
 
             let incomingOpacity = CABasicAnimation(keyPath: "opacity")
-            incomingOpacity.fromValue = incomingStartOpacity
+            incomingOpacity.fromValue = 0
             incomingOpacity.toValue = 1
             incomingOpacity.duration = opacityDuration
             incomingOpacity.timingFunction = opacityTiming
 
             let outgoingOpacity = CABasicAnimation(keyPath: "opacity")
             outgoingOpacity.fromValue = 1
-            outgoingOpacity.toValue = outgoingEndOpacity
+            outgoingOpacity.toValue = 0
             outgoingOpacity.duration = opacityDuration
             outgoingOpacity.timingFunction = opacityTiming
 
@@ -244,7 +231,7 @@ final class CustomTabGroup: ObservableObject {
 
             targetLayer.opacity = 1
             targetLayer.transform = CATransform3DIdentity
-            sourceLayer.opacity = transition == .slide ? 1 : 0
+            sourceLayer.opacity = 0
             targetLayer.add(incomingOpacity, forKey: "customTabIncomingOpacity")
             sourceLayer.add(outgoingOpacity, forKey: "customTabOutgoingOpacity")
 
@@ -262,20 +249,6 @@ final class CustomTabGroup: ObservableObject {
                 let outgoingPosition = CABasicAnimation(keyPath: "transform.translation.x")
                 outgoingPosition.fromValue = 0
                 outgoingPosition.toValue = -direction * 5
-                outgoingPosition.duration = opacityDuration
-                outgoingPosition.timingFunction = opacityTiming
-                sourceLayer.add(outgoingPosition, forKey: "customTabOutgoingPosition")
-            } else if transition == .slide {
-                let incomingPosition = CABasicAnimation(keyPath: "transform.translation.x")
-                incomingPosition.fromValue = incomingOffset
-                incomingPosition.toValue = 0
-                incomingPosition.duration = opacityDuration
-                incomingPosition.timingFunction = opacityTiming
-                targetLayer.add(incomingPosition, forKey: "customTabIncomingPosition")
-
-                let outgoingPosition = CABasicAnimation(keyPath: "transform.translation.x")
-                outgoingPosition.fromValue = 0
-                outgoingPosition.toValue = -direction * 10
                 outgoingPosition.duration = opacityDuration
                 outgoingPosition.timingFunction = opacityTiming
                 sourceLayer.add(outgoingPosition, forKey: "customTabOutgoingPosition")

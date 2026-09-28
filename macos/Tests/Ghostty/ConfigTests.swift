@@ -106,16 +106,15 @@ struct ConfigTests {
         #expect(config.macosTitlebarStyle == expected)
     }
 
-    @Test func customTabSwitchAnimationDefaultsToSlide() throws {
+    @Test func customTabSwitchAnimationDefaultsToSpring() throws {
         let config = try TemporaryConfig("")
-        #expect(config.macosCustomTabSwitchAnimation == .slide)
+        #expect(config.macosCustomTabSwitchAnimation == .spring)
     }
 
     @Test(arguments: [
         ("none", Ghostty.Config.MacOSCustomTabSwitchAnimation.none),
         ("fade", Ghostty.Config.MacOSCustomTabSwitchAnimation.fade),
         ("spring", Ghostty.Config.MacOSCustomTabSwitchAnimation.spring),
-        ("slide", Ghostty.Config.MacOSCustomTabSwitchAnimation.slide),
     ])
     func customTabSwitchAnimationValues(
         raw: String,
