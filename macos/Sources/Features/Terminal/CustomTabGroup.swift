@@ -408,29 +408,15 @@ private struct CustomTabButton: View {
 
     @State private var isHovering = false
 
-    private var iconFont: Font {
-        let candidates = [
-            (controller.window as? TerminalWindow)?.titlebarFont?.fontName,
-            "Symbols Nerd Font Mono",
-            "CaskaydiaCove Nerd Font",
-            "JetBrainsMono Nerd Font",
-        ]
-
-        if let name = candidates.compactMap({ $0 }).first(where: { NSFont(name: $0, size: 11) != nil }) {
-            return .custom(name, size: 11)
-        }
-        return .system(size: 11)
-    }
-
     var body: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 7) {
                 if let icon = controller.customTabIcon {
-                    Text(icon)
-                        .font(iconFont)
-                        .fixedSize()
-                        .frame(minWidth: 14, minHeight: 14)
-                        .padding(.horizontal, 2)
+                    CustomTabIconView(
+                        icon: icon,
+                        fontName: CustomTabIconFont.name,
+                        isSelected: isSelected
+                    )
                         .accessibilityHidden(true)
                 }
 
